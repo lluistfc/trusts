@@ -1282,16 +1282,23 @@ local function write_export_files()
     state.recommendation = build_recommendation(trusts, weapon_skills);
     local recommendation = state.recommendation;
 
-    local output_dir = addon.path .. '/exports';
+    local config_dir = AshitaCore:GetInstallPath() .. 'config\\addons\\trusts';
+    if (not ashita.fs.exists(config_dir)) then
+        ashita.fs.create_dir(config_dir);
+    end
+    local output_dir = config_dir .. '\\exports';
     if (not ashita.fs.exists(output_dir)) then
         ashita.fs.create_dir(output_dir);
     end
+    if (not ashita.fs.exists(output_dir)) then
+        return false, ('Failed to create export directory: %s'):fmt(output_dir);
+    end
 
     local safe_name = sanitize_filename(char_name);
-    local trusts_output_path = ('%s/%s_trusts.txt'):fmt(output_dir, safe_name);
-    local trust_actions_output_path = ('%s/%s_trust_actions.txt'):fmt(output_dir, safe_name);
-    local weapon_skills_output_path = ('%s/%s_weapon_abilities.txt'):fmt(output_dir, safe_name);
-    local recommendation_output_path = ('%s/%s_trust_recommendation.txt'):fmt(output_dir, safe_name);
+    local trusts_output_path = ('%s\\%s_trusts.txt'):fmt(output_dir, safe_name);
+    local trust_actions_output_path = ('%s\\%s_trust_actions.txt'):fmt(output_dir, safe_name);
+    local weapon_skills_output_path = ('%s\\%s_weapon_abilities.txt'):fmt(output_dir, safe_name);
+    local recommendation_output_path = ('%s\\%s_trust_recommendation.txt'):fmt(output_dir, safe_name);
     local trust_action_entries = collect_trust_action_entries(trusts);
 
     local ok, output_or_err = write_list_file(trusts_output_path, char_name, 'Trusts Learned', 'Trust Count', trusts, 'No trusts learned.');
