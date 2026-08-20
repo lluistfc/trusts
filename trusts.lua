@@ -1787,7 +1787,7 @@ local function draw_ui()
                 end
 
                 if imgui.BeginTabItem('Exports') then
-                    imgui.TextWrapped('Use the export button to write your current trusts, learned weapon skills, and recommendation file to the addon folder.');
+                    imgui.TextWrapped('Use the export button to write your current trusts, learned weapon skills, and recommendation files to config/addons/trusts/exports.');
                     imgui.Separator();
 
                     if imgui.Button('Refresh Recommendation', { 220, 28 }) then
