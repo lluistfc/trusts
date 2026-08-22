@@ -1,7 +1,7 @@
 local evaluator = require('model.evaluator');
 
 local optimizer = {};
-optimizer.version = 1;
+optimizer.version = 2;
 
 local function team_key(team)
     local ids = {};
@@ -58,6 +58,22 @@ local function prune_roster(roster, context, limit_per_role, overall_limit)
         if (not selected[identity]) then selected[identity] = true; table.insert(result, entry.member); end
     end
     for index = 1, math.min(overall_limit or 18, #scored) do add(scored[index]); end
+    -- Preserve the best specialist in every functional dimension. Singleton score
+    -- alone undervalues members whose capability completes a whole-team strategy.
+    local dimensions = {
+        'enmity', 'mitigation', 'sustained_healing', 'emergency_healing', 'aoe_healing',
+        'status_removal', 'physical_offense', 'ranged_offense', 'magical_offense',
+        'attack_support', 'accuracy_support', 'haste_support', 'refresh_support',
+        'mp_sustain', 'magic_burst', 'status_resilience', 'aoe_offense', 'dispel', 'interrupt',
+    };
+    for _, dimension in ipairs(dimensions) do
+        local best_member, best_value = nil, 0;
+        for _, member in ipairs(roster) do
+            local value = (member.coverage and member.coverage[dimension]) or 0;
+            if (value > best_value) then best_member, best_value = member, value; end
+        end
+        if (best_member ~= nil) then add({ member = best_member }); end
+    end
     for _, entry in ipairs(scored) do
         local role = entry.member.role or 'special';
         role_counts[role] = role_counts[role] or 0;

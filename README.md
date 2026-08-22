@@ -11,8 +11,14 @@ party combinations, and summoning selected Trusts.
 - Builds complete teams from party size, situation, role quotas, player weapon
   skill, desired skillchains/elements, enemy count, AoE tolerance, status
   removal, and Dispel requirements.
-- Ranks teams using Trust behavior, directed skillchain paths, support scaling,
-  role coverage, dependencies, and compatibility with the current character.
+- Ranks teams using Trust behavior, directed skillchain paths, typed support,
+  magic-burst follow-through, sustain, role coverage, dependencies, and
+  compatibility with the current character.
+- Treats the selected player role as satisfying one matching party quota, so a
+  tank, healer, or support player does not force a redundant Trust slot.
+- Displays contextual instructions for operating AI-sensitive teams, including
+  Ayame priming, burst-window discipline, Qultada leveling rolls, summon order,
+  and autonomous AoE warnings.
 - Provides an optional element-coverage overlay for currently summoned Trusts.
 - Summons only when an individual `Summon` button is pressed. Automatic team
   summoning has intentionally been removed.

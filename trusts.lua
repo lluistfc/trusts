@@ -21,7 +21,7 @@
 
 addon.name      = 'trusts';
 addon.author    = 'Codex';
-addon.version   = '2.0.0';
+addon.version   = '2.1.0';
 addon.desc      = 'Exports trust and weapon skill lists, shows recommended trust combos, and can summon them.';
 addon.link      = 'https://ashitaxi.com/';
 
@@ -74,7 +74,7 @@ local function load_coverage_icon(kind, name)
 end
 
 local default_settings = T{
-    settings_version = 3,
+    settings_version = 4,
     coverage_overlay = T{
         visible = true,
     },
@@ -577,6 +577,10 @@ local function draw_team_block(title, team, help_text, evaluation)
             local plan = evaluation.primary_sc_plan;
             imgui.TextWrapped(('Primary SC: %s using %s -> %s'):fmt(plan.direction, plan.ws, plan.result));
         end
+        if (#(evaluation.instructions or T{}) > 0 and imgui.TreeNode(('How to run##%s'):fmt(normalize_trust_name(title)))) then
+            for _, instruction in ipairs(evaluation.instructions) do imgui.BulletText(instruction); end
+            imgui.TreePop();
+        end
     end
 end
 
@@ -1029,9 +1033,9 @@ end
 local function build_evaluation_context(weapon_skills, config)
     local fit = collect_character_ws_fit(weapon_skills, config.preferred_ws);
     local requirements = T{};
-    if ((tonumber(config.role_counts.tank) or 0) > 0) then requirements.enmity = 0.65; end
-    if ((tonumber(config.role_counts.healer) or 0) > 0) then requirements.healing = 0.65; end
-    if ((tonumber(config.role_counts.support) or 0) > 0) then requirements.support = 0.45; end
+    if ((tonumber(config.role_counts.tank) or 0) > 0 and config.player_role ~= 'Tank') then requirements.enmity = 0.65; end
+    if ((tonumber(config.role_counts.healer) or 0) > 0 and config.player_role ~= 'Healer') then requirements.healing = 0.65; end
+    if ((tonumber(config.role_counts.support) or 0) > 0 and config.player_role ~= 'Support') then requirements.support = 0.45; end
     if (config.require_status_removal) then requirements.status_removal = 0.65; end
     if (config.require_dispel) then requirements.dispel = 0.65; end
     return T{
@@ -1051,9 +1055,16 @@ end
 local function build_custom_team(trusts, weapon_skills, config)
     local context, fit = build_evaluation_context(weapon_skills, config);
     local maxTrusts = math.max(1, math.min(5, tonumber(config.max_trusts) or 3));
+    local effectiveRoleCounts = {};
+    for role, count in pairs(config.role_counts or T{}) do effectiveRoleCounts[role] = tonumber(count) or 0; end
+    local playerRoleToQuota = { Tank = 'tank', Healer = 'healer', Support = 'support' };
+    local coveredRole = playerRoleToQuota[config.player_role];
+    if (coveredRole ~= nil) then
+        effectiveRoleCounts[coveredRole] = math.max(0, (effectiveRoleCounts[coveredRole] or 0) - 1);
+    end
     local requestedSlots = 0;
     for _, role in ipairs(TEAM_BUILDER_ROLES) do
-        requestedSlots = requestedSlots + math.max(0, tonumber(config.role_counts[role.id]) or 0);
+        requestedSlots = requestedSlots + math.max(0, tonumber(effectiveRoleCounts[role.id]) or 0);
     end
     if (requestedSlots > maxTrusts) then
         return T{}, fit, nil, ('Role quotas request %u slots but the maximum is %u.'):fmt(requestedSlots, maxTrusts);
@@ -1063,7 +1074,7 @@ local function build_custom_team(trusts, weapon_skills, config)
     local best = team_optimizer.optimize(roster, context, {
         max_trusts = maxTrusts,
         beam_width = 140,
-        role_counts = config.role_counts,
+        role_counts = effectiveRoleCounts,
     });
     if (best == nil) then return T{}, fit, nil, 'No complete team satisfies the selected role requirements.'; end
     local byId, team = {}, T{};
@@ -1151,6 +1162,9 @@ local function build_recommendation(trusts, weapon_skills)
         situation = 'General Physical',
         preferred_ws = smartConfig.preferred_ws,
         player_sc_policy = smartConfig.player_sc_policy,
+        player_role = smartConfig.player_role,
+        enemy_count = smartConfig.enemy_count,
+        aoe_tolerance = smartConfig.aoe_tolerance,
         role_counts = T{ tank = 0, healer = 1, support = smartConfig.max_trusts >= 2 and 1 or 0, melee = 0, ranged = 0, caster = 0, special = 0 },
         ws_damage_elements = T{},
         sc_result_elements = smartConfig.sc_result_elements,
@@ -1163,6 +1177,9 @@ local function build_recommendation(trusts, weapon_skills)
         situation = 'Boss Survival',
         preferred_ws = smartConfig.preferred_ws,
         player_sc_policy = smartConfig.player_sc_policy,
+        player_role = smartConfig.player_role,
+        enemy_count = smartConfig.enemy_count,
+        aoe_tolerance = smartConfig.aoe_tolerance,
         role_counts = T{ tank = smartConfig.max_trusts >= 2 and 1 or 0, healer = 1, support = smartConfig.max_trusts >= 3 and 1 or 0, melee = 0, ranged = 0, caster = 0, special = 0 },
         ws_damage_elements = T{}, sc_result_elements = smartConfig.sc_result_elements,
         skillchains = smartConfig.skillchains,
@@ -1401,6 +1418,10 @@ local function write_export_files()
         for _, entry in ipairs(recommendation.ws_evaluation.ledger or {}) do
             file:write(('  [%s] %+.1f %s\n'):fmt(entry.id, entry.delta, entry.explanation));
         end
+        file:write('Operational instructions:\n');
+        for _, instruction in ipairs(recommendation.ws_evaluation.instructions or {}) do
+            file:write(('  - %s\n'):fmt(instruction));
+        end
     end
     file:write('\nRole notes:\n');
     for _, line in ipairs(recommendation.role_notes) do
@@ -1511,6 +1532,11 @@ local function behavior_summary(capabilities)
     if (behavior.tank) then values:append('tank control'); end
     if (behavior.healer) then values:append('healing'); end
     if (behavior.physical_support) then values:append('physical buffs'); end
+    if (behavior.accuracy_support) then values:append('accuracy buffs'); end
+    if (behavior.haste_support) then values:append('Haste'); end
+    if (behavior.refresh_support) then values:append('Refresh'); end
+    if (behavior.magic_burst) then values:append('magic burst'); end
+    if (behavior.mp_support or behavior.mp_efficient) then values:append('MP sustain'); end
     if (behavior.sc_policy == 'closer') then values:append('SC closer'); end
     if (behavior.sc_policy == 'opener') then values:append('SC opener'); end
     if (behavior.interrupt) then values:append('interrupts'); end
@@ -1590,8 +1616,15 @@ local function draw_team_builder()
         end
         quotaTotal = quotaTotal + newCount;
     end
-    if (quotaTotal > config.max_trusts) then
-        imgui.TextColored({ 1.0, 0.55, 0.35, 1.0 }, ('Role quotas total %u, above the maximum of %u. Reduce a quota to build a team.'):fmt(quotaTotal, config.max_trusts));
+    local playerCoveredQuota = (config.player_role == 'Tank' and (config.role_counts.tank or 0) > 0)
+        or (config.player_role == 'Healer' and (config.role_counts.healer or 0) > 0)
+        or (config.player_role == 'Support' and (config.role_counts.support or 0) > 0);
+    local trustQuotaTotal = quotaTotal - (playerCoveredQuota and 1 or 0);
+    if (playerCoveredQuota) then
+        imgui.TextWrapped('Your selected role satisfies one matching quota; the remaining quota count applies to Trust slots.');
+    end
+    if (trustQuotaTotal > config.max_trusts) then
+        imgui.TextColored({ 1.0, 0.55, 0.35, 1.0 }, ('Trust role quotas total %u, above the maximum of %u. Reduce a quota to build a team.'):fmt(trustQuotaTotal, config.max_trusts));
     end
 
     if (imgui.Button('Balanced Defaults', { 170, 26 })) then
@@ -1666,6 +1699,10 @@ local function draw_team_builder()
         end
         for _, warning in ipairs(evaluation.warnings or {}) do
             imgui.TextColored({ 1.0, 0.72, 0.35, 1.0 }, warning);
+        end
+        if (#(evaluation.instructions or T{}) > 0 and imgui.TreeNode('How to run this team')) then
+            for _, instruction in ipairs(evaluation.instructions) do imgui.BulletText(instruction); end
+            imgui.TreePop();
         end
         if (imgui.TreeNode('Why this team')) then
             for _, entry in ipairs(evaluation.ledger or {}) do
@@ -1884,10 +1921,10 @@ local function migrate_settings()
     config.max_trusts = model_schema.clamp_integer(config.max_trusts, 1, 5, 3);
     if (not model_schema.contains(model_schema.situations, config.situation)) then config.situation = 'General Physical'; end
     config.preferred_ws = config.preferred_ws or 'Auto';
-    config.player_sc_policy = config.player_sc_policy or 'Either';
-    config.player_role = config.player_role or 'Auto';
-    config.enemy_count = config.enemy_count or 'Single';
-    config.aoe_tolerance = config.aoe_tolerance or 'Normal';
+    if (not model_schema.contains(model_schema.player_sc_policies, config.player_sc_policy)) then config.player_sc_policy = 'Either'; end
+    if (not model_schema.contains(model_schema.player_roles, config.player_role)) then config.player_role = 'Auto'; end
+    if (not model_schema.contains(model_schema.enemy_counts, config.enemy_count)) then config.enemy_count = 'Single'; end
+    if (not model_schema.contains(model_schema.aoe_tolerances, config.aoe_tolerance)) then config.aoe_tolerance = 'Normal'; end
     if (config.require_status_removal == nil) then config.require_status_removal = false; end
     if (config.require_dispel == nil) then config.require_dispel = false; end
     config.role_counts = config.role_counts or T{};
@@ -1908,7 +1945,7 @@ local function migrate_settings()
     if (state.settings.coverage_overlay.visible == nil) then
         state.settings.coverage_overlay.visible = true;
     end
-    state.settings.settings_version = 3;
+    state.settings.settings_version = 4;
     settings.save();
 end
 

@@ -2,7 +2,7 @@ local graph = require('model.skillchain_graph');
 local presets = require('model.presets');
 
 local evaluator = {};
-evaluator.version = 1;
+evaluator.version = 2;
 
 local function sorted_members(team)
     local result = {};
@@ -142,6 +142,14 @@ function evaluator.evaluate_team(team, context)
     local ranged = sum_capped(team, 'ranged_offense', 1.5) / 1.5;
     local magic = sum_capped(team, 'magical_offense', 1.5) / 1.5;
     local support = sum_capped(team, 'support', 1.5) / 1.5;
+    local attack_support = maximum_coverage(team, 'attack_support');
+    local accuracy_support = maximum_coverage(team, 'accuracy_support');
+    local haste_support = maximum_coverage(team, 'haste_support');
+    local refresh_support = maximum_coverage(team, 'refresh_support');
+    local mp_sustain = maximum_coverage(team, 'mp_sustain');
+    local magic_burst = maximum_coverage(team, 'magic_burst');
+    local status_resilience = maximum_coverage(team, 'status_resilience');
+    local aoe_offense = sum_capped(team, 'aoe_offense', 1.5) / 1.5;
     local positioning = sum_capped(team, 'positioning_safety', #team > 0 and #team or 1) / math.max(1, #team);
 
     add_ledger(result, 'coverage.tank', 'survival', 45 * ((enmity + mitigation) / 2), {}, 'estimated', 'Tank control and mitigation coverage.');
@@ -154,6 +162,8 @@ function evaluator.evaluate_team(team, context)
     end
     add_ledger(result, 'offense.mix', 'offense', 100 * math.min(1, physical * 0.55 + ranged * 0.25 + magic * 0.20), {}, 'estimated', 'Combined physical, ranged, and magical pressure.');
     add_ledger(result, 'support.coverage', 'support', 100 * support, {}, 'estimated', 'Capped party support coverage.');
+    add_ledger(result, 'support.typed', 'support', 18 * math.min(1, attack_support * 0.35 + accuracy_support * 0.20
+        + haste_support * 0.25 + refresh_support * 0.20), {}, 'documented', 'Nonredundant attack, accuracy, Haste, and Refresh support.');
     add_ledger(result, 'safety.positioning', 'safety', 100 * positioning, {}, 'estimated', 'Ranged positioning and exposure profile.');
 
     local direct_selected = selected_count(context.ws_damage_elements);
@@ -212,6 +222,55 @@ function evaluator.evaluate_team(team, context)
         add_ledger(result, 'skillchain.primary', 'skillchain', math.min(75, paths[1].value), { paths[1].member.id }, paths[1].member.confidence,
             ('%s using %s creates %s.'):format(paths[1].direction, paths[1].ws, paths[1].result));
     end
+    if (paths[1] ~= nil and magic_burst > 0) then
+        local burst_value = 34 * magic_burst * math.max(0.35, paths[1].reliability or 0.35);
+        if (context.situation == 'Magic Burst') then burst_value = burst_value * 1.45; end
+        add_ledger(result, 'magic_burst.follow_through', 'skillchain', burst_value,
+            { paths[1].member.id }, 'documented', 'A party magic burster can exploit the primary skillchain window.');
+    elseif (context.situation == 'Magic Burst') then
+        add_ledger(result, 'magic_burst.missing', 'skillchain', -30, {}, 'documented',
+            'Magic Burst mode lacks either an executable skillchain or a capable burster.');
+    end
+
+    if (context.situation == 'Leveling') then
+        for _, member in ipairs(team) do
+            local value = tonumber(member.behavior.leveling) or 0;
+            if (value > 0) then
+                add_ledger(result, 'context.leveling.' .. tostring(member.id or member.name), 'offense', math.min(12, value / 3),
+                    { member.id }, member.confidence, member.name .. ' has documented leveling utility.');
+            end
+        end
+    elseif (context.situation == 'Boss Survival') then
+        for _, member in ipairs(team) do
+            local value = (tonumber(member.behavior.boss) or 0) + (tonumber(member.behavior.survival) or 0);
+            if (value > 0) then
+                add_ledger(result, 'context.boss.' .. tostring(member.id or member.name), 'survival', math.min(15, value / 5),
+                    { member.id }, member.confidence, member.name .. ' has documented boss and survival utility.');
+            end
+        end
+    elseif (context.situation == 'Status Heavy') then
+        add_ledger(result, 'context.status_resilience', 'survival', 24 * status_resilience, {}, 'documented',
+            'Status-resilient actions remain available through silence or paralysis.');
+        for _, member in ipairs(team) do
+            local value = tonumber(member.behavior.status_heavy) or 0;
+            if (value > 0) then
+                add_ledger(result, 'context.status_specialist.' .. tostring(member.id or member.name), 'survival', math.min(15, value / 4),
+                    { member.id }, member.confidence, member.name .. ' has documented status-heavy encounter utility.');
+            end
+        end
+    elseif (context.situation == 'Multiple Enemies') then
+        add_ledger(result, 'context.aoe_offense', 'offense', 26 * aoe_offense, {}, 'documented',
+            'Controlled area damage improves multi-enemy throughput.');
+    end
+
+    if (refresh_support > 0 and (healing > 0 or magic_burst > 0)) then
+        add_ledger(result, 'synergy.refresh_mp_user', 'support', 10 * refresh_support, {}, 'documented',
+            'Refresh supports an MP-dependent healer or magic burster.');
+    end
+    if (mp_sustain > 0) then
+        add_ledger(result, 'sustain.mp', 'survival', 10 * mp_sustain, {}, 'documented',
+            'Efficient or non-MP recovery improves long-fight sustain.');
+    end
     if (paths[2] ~= nil) then
         add_ledger(result, 'skillchain.fallback', 'skillchain', math.min(25, paths[2].value * 0.30), { paths[2].member.id }, paths[2].member.confidence,
             ('Fallback: %s using %s creates %s.'):format(paths[2].direction, paths[2].ws, paths[2].result));
@@ -229,6 +288,24 @@ function evaluator.evaluate_team(team, context)
             table.insert(result.unmet_requirements, key);
         end
     end
+
+    result.instructions = {};
+    local has_aoe_risk = false;
+    local has_backline = false;
+    for _, member in ipairs(team) do
+        if (member.behavior.aoe_risk) then has_aoe_risk = true; end
+        if (member.behavior.ranged) then has_backline = true; end
+        if (member.behavior.ai_instruction) then table.insert(result.instructions, member.behavior.ai_instruction); end
+    end
+    if (has_backline) then table.insert(result.instructions, 'Summon frontline members first and fragile backline members last; settle your position before committing to the fight.'); end
+    if (result.primary_sc_plan ~= nil) then
+        table.insert(result.instructions, ('Plan: %s using %s to create %s.'):format(
+            result.primary_sc_plan.direction, result.primary_sc_plan.ws, result.primary_sc_plan.result));
+    end
+    if (magic_burst > 0 and result.primary_sc_plan ~= nil) then
+        table.insert(result.instructions, 'After the closing weapon skill, avoid another property-bearing WS until the magic burster finishes.');
+    end
+    if (has_aoe_risk) then table.insert(result.instructions, 'This lineup contains autonomous AoE; avoid it near unwanted targets.'); end
 
     local preset = presets[context.situation] or presets['General Physical'];
     for category, weight in pairs(preset.weights) do

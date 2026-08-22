@@ -5,6 +5,7 @@ package.path = package.path .. ';' .. addon_directory .. '?.lua;' .. addon_direc
 
 local evaluator = require 'model.evaluator'
 local optimizer = require 'model.optimizer'
+local compiler = require 'model.capability_compiler'
 
 local function member(id, name, role, coverage, weapon_skills, behavior)
     return {
@@ -51,3 +52,50 @@ assert(best ~= nil and best.evaluation.eligible, 'optimizer should find an eligi
 assert(#best.team == 3, 'optimizer should respect party size')
 
 print 'trusts model fixtures: ok'
+
+local burster = member(5, 'Burster', 'caster', {
+    magical_offense = 1.0,
+    magic_burst = 0.9,
+    positioning_safety = 0.6,
+}, {}, { ai_instruction = 'Wait for the burst window.' })
+local burst_context = {
+    situation = 'Magic Burst',
+    player_properties = { Distortion = true },
+    player_sc_policy = 'Trust Closes',
+    requirements = {},
+}
+local with_burster = evaluator.evaluate_team({ closer, burster }, burst_context)
+local without_burster = evaluator.evaluate_team({ closer, support }, burst_context)
+assert(with_burster.categories.skillchain > without_burster.categories.skillchain,
+    'an executable chain with a real magic burster should beat a theoretical chain alone')
+assert(#with_burster.instructions >= 2, 'AI and skillchain operation instructions should be emitted')
+
+local compiled_burster = compiler.compile({ id = 6, name = 'Compiled Burster' }, {
+    role = 'caster',
+    actions = {},
+}, {
+    magic = 42,
+    magic_burst = 35,
+    mp_efficient = true,
+    haste_support = true,
+    silence_safe = true,
+}, {})
+assert(compiled_burster.coverage.magic_burst > 0.8, 'magic burst behavior should compile to functional coverage')
+assert(compiled_burster.coverage.mp_sustain >= 0.8, 'MP efficiency should compile to sustain coverage')
+assert(compiled_burster.coverage.haste_support >= 0.8, 'typed Haste support should be preserved')
+assert(compiled_burster.coverage.status_resilience >= 0.8, 'status-safe behavior should compile to resilience')
+
+local large_roster = {}
+for index = 1, 25 do
+    table.insert(large_roster, member(100 + index, 'Generic ' .. index, 'melee', { physical_offense = 0.8 }))
+end
+local specialist = member(999, 'Only Dispel', 'special', { dispel = 0.9 })
+table.insert(large_roster, specialist)
+local specialist_best = optimizer.optimize(large_roster, {
+    situation = 'General Physical',
+    requirements = { dispel = 0.65 },
+}, { max_trusts = 2, beam_width = 48 })
+assert(specialist_best ~= nil and specialist_best.evaluation.eligible,
+    'functional specialists must survive roster pruning when required by the encounter')
+
+print 'trusts advanced model fixtures: ok'

@@ -6,6 +6,9 @@ schema.situations = {
     'Boss Survival', 'Multiple Enemies', 'Status Heavy', 'Avoid AoE',
 };
 schema.player_sc_policies = { 'Either', 'Trust Opens', 'Trust Closes' };
+schema.player_roles = { 'Auto', 'Tank', 'Healer', 'Support', 'Damage' };
+schema.enemy_counts = { 'Single', 'Few', 'Many' };
+schema.aoe_tolerances = { 'Low', 'Normal', 'High' };
 schema.confidence = {
     verified = true,
     documented = true,

@@ -1,7 +1,7 @@
 local graph = require('model.skillchain_graph');
 
 local compiler = {};
-compiler.version = 1;
+compiler.version = 2;
 
 local function set_add(set, value)
     if (value ~= nil and value ~= '') then set[value] = true; end
@@ -30,6 +30,9 @@ function compiler.compile(trust, profile, behavior, ws_by_name)
             enmity = 0, mitigation = 0, sustained_healing = 0, emergency_healing = 0,
             aoe_healing = 0, status_removal = 0, physical_offense = 0,
             ranged_offense = 0, magical_offense = 0, support = 0,
+            attack_support = 0, accuracy_support = 0, haste_support = 0,
+            refresh_support = 0, mp_sustain = 0, magic_burst = 0,
+            status_resilience = 0, aoe_offense = 0,
             dispel = 0, interrupt = 0, positioning_safety = 0,
         },
         confidence = behavior.confidence or (next(behavior) and 'observed' or 'unknown'),
@@ -51,6 +54,14 @@ function compiler.compile(trust, profile, behavior, ws_by_name)
     if (behavior.magic) then coverage.magical_offense = math.max(coverage.magical_offense, math.min(1, behavior.magic / 40)); end
     if (behavior.ranged) then coverage.positioning_safety = math.max(coverage.positioning_safety, 0.65); end
     if (behavior.support or behavior.physical_support or behavior.haste_support or behavior.refresh_support) then coverage.support = math.max(coverage.support, 0.80); end
+    if (behavior.physical_support) then coverage.attack_support = math.max(coverage.attack_support, 0.85); end
+    if (behavior.accuracy_support) then coverage.accuracy_support = math.max(coverage.accuracy_support, 0.85); end
+    if (behavior.haste_support) then coverage.haste_support = math.max(coverage.haste_support, 0.85); end
+    if (behavior.refresh_support) then coverage.refresh_support = math.max(coverage.refresh_support, 0.85); end
+    if (behavior.mp_support or behavior.mp_efficient) then coverage.mp_sustain = math.max(coverage.mp_sustain, 0.80); end
+    if (behavior.magic_burst) then coverage.magic_burst = math.max(coverage.magic_burst, math.min(1, behavior.magic_burst / 40)); end
+    if (behavior.silence_safe or behavior.paralyze_safe) then coverage.status_resilience = 0.90; end
+    if (behavior.multi_target) then coverage.aoe_offense = math.min(1, behavior.multi_target / 25); end
     if (behavior.dispel) then coverage.dispel = 0.90; end
     if (behavior.interrupt) then coverage.interrupt = 0.90; end
 
